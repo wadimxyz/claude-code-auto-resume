@@ -29,11 +29,17 @@ or `auto-resume: resuming at 14:31`.
 
 ## How it works
 
-1. A turn ends with a `rate_limit` error (`StopFailure`).
+1. The usage limit is hit. Claude Code reports that in one of two ways, and both count:
+   - **soft stop** – it tells the model *"Usage limit reached; a short grace allowance
+     remains …"* and the model wraps up on its own, or
+   - **hard stop** – the request fails with a `rate_limit` error.
+
+   As a fallback, any turn that ends while a rate-limit window is at 100 % counts too.
 2. The plugin reads the rate-limit windows Claude Code reports and takes the reset time
    of the exhausted window (the 5-hour window, or the 7-day window if that one is full).
 3. One minute after that reset it submits:
-   *"The usage limit has reset. Continue the interrupted task exactly where you left off."*
+   *"The usage limit has reset. Continue the interrupted task exactly where you left off.
+   If nothing was left unfinished, say so in one line."*
 4. If no reset time is known, it retries every 15 minutes. After 8 resumes in a row
    that hit the limit again, it gives up and tells you so.
 5. If you type a prompt yourself in the meantime, the scheduled resume is dropped.
@@ -46,6 +52,8 @@ or `auto-resume: resuming at 14:31`.
 - **It runs unattended.** Whatever permission mode the session uses applies to the
   resumed work as well. Think twice before combining it with bypass mode.
 - The resumed turn uses up the fresh window right away.
+- Subagents or workflows the model stopped while wrapping up are not restarted by the
+  plugin itself; the resume prompt asks the model to pick the task up again.
 
 ## Development
 

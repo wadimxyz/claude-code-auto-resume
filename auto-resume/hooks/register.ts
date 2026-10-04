@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionRateLimit, Timer } from 'claude-code'
+import type { Args, EngineInterface, Register, SessionRateLimit, Timer } from 'claude-code'
 
 import type { Pending } from '../types'
 
@@ -15,7 +15,16 @@ const RETRY_MS = 15 * 60_000
 const MAX_STREAK = 8
 
 const RESUME_TEXT =
-  'The usage limit has reset. Continue the interrupted task exactly where you left off.'
+  'The usage limit has reset. Continue the interrupted task exactly where you left off. ' +
+  'If nothing was left unfinished, say so in one line.'
+
+/** The note Claude Code injects when the limit is hit and the turn gets a short grace to wrap up. */
+const LIMIT_NOTE = /usage limit reached/i
+
+const isLimitNote = (m: Args<'session.append'>['message']) =>
+  m.type === 'user' &&
+  m.isMeta === true &&
+  m.content.some(b => b.type === 'text' && typeof b.text === 'string' && LIMIT_NOTE.test(b.text))
 
 const hhmm = (ms: number) => {
   const d = new Date(ms)
@@ -74,6 +83,8 @@ const arm = async ($: EngineInterface, next: Pending) => {
 
 /** Schedules a resume after a rate limit, or gives up after MAX_STREAK failures. */
 const schedule = async ($: EngineInterface) => {
+  // One limit can be reported twice (the wrap-up note, then the cut-off error).
+  if ((await read($, pending)) !== null) return
   const now = await $.clock.now()
   const { rateLimits } = await $.session.usage()
   const reset = resetAfterError(rateLimits, now)
@@ -139,14 +150,28 @@ export const register: Register = on => {
     return { text: `auto-resume: ${state}. Usage: /auto-resume on | off | status` }
   })
 
+  // Hard stop: the request itself failed on the limit.
   on('classic.StopFailure', async ($, e, next) => {
     if (e.error === 'rate_limit' && (await read($, isEnabled))) await schedule($)
     return next(e)
   })
 
+  // Soft stop: Claude Code tells the model the limit is reached and lets it wrap up.
+  on('session.append', async ($, e, next) => {
+    if (e.agentId === undefined && isLimitNote(e.message) && (await read($, isEnabled))) {
+      await schedule($)
+    }
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
-    // A turn that answered normally resets the failure count.
-    if (e.agentId === undefined && e.reason === 'answer') await update($, streak, () => 0)
+    if (e.agentId !== undefined || !(await read($, isEnabled))) return next(e)
+    if ((await read($, pending)) !== null) return next(e)
+    // Fallback: the turn ended while a window is exhausted, however that was reported.
+    const now = await $.clock.now()
+    if (blockingReset((await $.session.usage()).rateLimits, now) !== null) await schedule($)
+    // A turn that answered with nothing scheduled resets the failure count.
+    else if (e.reason === 'answer') await update($, streak, () => 0)
     return next(e)
   })
 

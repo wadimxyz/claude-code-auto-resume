@@ -22,27 +22,37 @@ That plugin API is early access and may change between releases.
 | --- | --- |
 | `/auto-resume on` | Switch on for this session. If you are at the limit already, the resume is scheduled right away. |
 | `/auto-resume off` | Switch off and drop a scheduled resume. |
-| `/auto-resume` | Show the state. |
+| `/auto-resume status` | Show the state, the current rate-limit windows and the last limit signal with what the plugin did about it. |
+| `/auto-resume test [2m\|30s]` | Send a harmless test prompt after the given time (default 2 minutes), to check end to end that an idle session really picks it up. Works while off. |
 
 It is off in every new session. While on, the status line shows `auto-resume: on`
 or `auto-resume: resuming at 14:31`.
 
+**Try it once after installing:** `/auto-resume test 30s`, leave the session idle, and
+a test prompt should arrive and start a turn on its own.
+
 ## How it works
 
-1. The usage limit is hit. Claude Code reports that in one of two ways, and both count:
-   - **soft stop** – it tells the model *"Usage limit reached; a short grace allowance
-     remains …"* and the model wraps up on its own, or
-   - **hard stop** – the request fails with a `rate_limit` error.
-
-   As a fallback, any turn that ends while a rate-limit window is at 100 % counts too.
-2. The plugin reads the rate-limit windows Claude Code reports and takes the reset time
-   of the exhausted window (the 5-hour window, or the 7-day window if that one is full).
+1. The plugin watches for the usage limit through three independent signals; the first
+   one to arrive schedules the resume, the others are recognised as the same limit:
+   - **rate-limit windows (primary)** – a window (`five_hour`, `seven_day`) reaches 100 %.
+     These are the same readings the status line shows. Checked whenever they change and
+     at the end of every turn.
+   - **soft stop** – Claude Code tells the model *"Usage limit reached; a short grace
+     allowance remains …"* and the model wraps up on its own.
+   - **hard stop** – a request fails with a `rate_limit` error.
+2. It takes the reset time of the exhausted window (the 5-hour window, or the 7-day window
+   if that one is full).
 3. One minute after that reset it submits:
    *"The usage limit has reset. Continue the interrupted task exactly where you left off.
    If nothing was left unfinished, say so in one line."*
 4. If no reset time is known, it retries every 15 minutes. After 8 resumes in a row
    that hit the limit again, it gives up and tells you so.
 5. If you type a prompt yourself in the meantime, the scheduled resume is dropped.
+
+If nothing happened, `/auto-resume status` tells you why: which signal was seen last,
+when, and what came of it (scheduled, already scheduled, ignored because the plugin was
+off, gave up).
 
 ## Things to know
 

@@ -12,6 +12,7 @@ const world = (on: On, limits: () => SessionRateLimit[]) => {
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('classic.StopFailure', async () => ({}))
   on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.usage', async () => ({
     value: {
       startedAt: T0,
@@ -200,5 +201,63 @@ test('a normal turn with room left schedules nothing', async ($, on) => {
   await $.command.run(run('on'))
   await $.turn.complete(answered)
   await w.clock.advance(5 * 60 * MIN)
+  expect(w.submitted).toEqual([])
+})
+
+const measure = (rateLimits: SessionRateLimit[]) => ({
+  context: { windowSize: 200_000 } as never,
+  rateLimits,
+  changed: ['rateLimits' as const],
+})
+
+test('primary signal: a window reaching 100 % schedules a resume', async ($, on) => {
+  let limits: SessionRateLimit[] = []
+  const w = world(on, () => limits)
+  await $.session.start(start)
+  // Nothing at the limit yet when switched on: the schedule comes from the measurement.
+  await $.command.run(run('on'))
+  limits = fiveHourFull(30)
+  await $.session.measure(measure(limits))
+  await w.clock.advance(31 * MIN + 1)
+  expect(w.submitted.length).toBe(1)
+  expect(w.submitted[0]).toContain('Continue')
+})
+
+test('all three signals for one limit resume once', async ($, on) => {
+  const w = world(on, () => fiveHourFull(30))
+  await $.session.start(start)
+  await $.command.run(run('on'))
+  await $.session.measure(measure(fiveHourFull(30)))
+  await appendNote($)
+  await $.classic.StopFailure(hitLimit)
+  await $.turn.complete(answered)
+  await w.clock.advance(5 * 60 * MIN)
+  expect(w.submitted.length).toBe(1)
+})
+
+test('test command sends a test prompt after the given time, even when off', async ($, on) => {
+  const w = world(on, () => [])
+  await $.session.start(start)
+  const r = await $.command.run(run('test 30s'))
+  expect(r.text).toContain('Test scheduled')
+  await w.clock.advance(29_000)
+  expect(w.submitted).toEqual([])
+  await w.clock.advance(1_001)
+  expect(w.submitted.length).toBe(1)
+  expect(w.submitted[0]).toContain('auto-resume test')
+})
+
+test('status shows the windows and the last signal with its outcome', async ($, on) => {
+  const w = world(on, () => fiveHourFull(30))
+  await $.session.start(start)
+  await $.classic.StopFailure(hitLimit)
+  const off = await $.command.run(run('status'))
+  expect(off.text).toContain('five_hour 100 %')
+  expect(off.text).toContain('rate_limit error')
+  expect(off.text).toContain('ignored: auto-resume was off')
+  await $.command.run(run('on'))
+  const on_ = await $.command.run(run(''))
+  expect(on_.text).toContain('resume at')
+  expect(on_.text).toContain('resuming at')
   expect(w.submitted).toEqual([])
 })

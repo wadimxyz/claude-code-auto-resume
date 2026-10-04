@@ -1,0 +1,9 @@
+{
+  "name": "auto-resume",
+  "version": "0.2.0",
+  "description": "Resumes automatically once a Claude usage limit (5-hour window) resets – only when switched on with /auto-resume on.",
+  "author": { "name": "Wadim" },
+  "license": "MIT",
+  "keywords": ["rate-limit", "usage-limit", "resume", "automation"],
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "wadim-mods",
+  "owner": { "name": "Wadim" },
+  "plugins": [
+    {
+      "name": "auto-resume",
+      "source": "./auto-resume",
+      "description": "Resumes automatically once a Claude usage limit resets (/auto-resume on)."
+    }
+  ]
+}
